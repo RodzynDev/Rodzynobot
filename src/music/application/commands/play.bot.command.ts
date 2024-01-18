@@ -24,6 +24,6 @@ export class PlayBotCommand {
         @InteractionEvent(SlashCommandPipe) PlayDTO: PlayDto,
         @IA() interaction: CommandInteraction,
     ): any {
-        return this.musicService.play(interaction, PlayDTO.song)
+        return this.musicService.playSong(interaction, PlayDTO.song)
     }
 }

@@ -2,7 +2,6 @@ import { Param } from '@discord-nestjs/core';
 import { Transform } from 'class-transformer';
 
 export class PlayDto {
-    @Transform(({ value }) => value.toLowerCase())
     @Param({
         name: 'song',
         description:

@@ -35,7 +35,8 @@
     "nestjs-dynamic-providers": "^0.3.1",
     "reflect-metadata": "^0.1.13",
     "rxjs": "^7.8.1",
-    "sodium-native": "^4.0.5"
+    "sodium-native": "^4.0.5",
+    "ytdl-core": "^4.11.5"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.0.0",

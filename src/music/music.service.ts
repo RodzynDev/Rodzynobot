@@ -5,15 +5,14 @@ import {
     createAudioPlayer,
     createAudioResource,
     getVoiceConnection,
-    getVoiceConnections,
     joinVoiceChannel,
-    NoSubscriberBehavior,
     VoiceConnection,
     VoiceConnectionStatus,
 } from '@discordjs/voice';
 import {Injectable, Logger} from '@nestjs/common';
-import {Client, ClientEvents, CommandInteraction, EmbedBuilder, GuildMember, RGBTuple} from "discord.js";
+import {Client, CommandInteraction, EmbedBuilder, GuildMember, RGBTuple} from "discord.js";
 import {InjectDiscordClient} from "@discord-nestjs/core";
+import ytdl from 'ytdl-core';
 
 export const DefaultErrorMessage: RGBTuple = [255, 161, 42];
 
@@ -27,10 +26,28 @@ export class MusicService {
         @InjectDiscordClient() private readonly client: Client,
     ) {}
 
-    play(commandInteraction: CommandInteraction, songUrl: string) {
+    async playSong(commandInteraction: CommandInteraction, songUrl: string) {
         this.logger.log(`Playing song ${songUrl}`);
         console.log(commandInteraction.member);
+
+        this.audioResource = createAudioResource(ytdl(songUrl, {filter: 'audioonly'}));
         this.tryJoinChannelAndEstablishVoiceConnection(commandInteraction.member as GuildMember);
+
+        if (this.voiceConnection === undefined) {
+            this.logger.error(`Unable to play song ${songUrl} because voice connection is undefined`);
+            return;
+        }
+
+        this.audioPlayer.play(this.audioResource);
+        this.voiceConnection.subscribe(this.audioPlayer);
+
+        console.log(this.audioPlayer.state.status);
+        console.log(this.audioPlayer.state.status === AudioPlayerStatus.Playing);
+        console.log(this.audioPlayer.state.status === AudioPlayerStatus.Idle);
+        console.log(this.audioPlayer.state.status === AudioPlayerStatus.Paused);
+        console.log(this.audioPlayer.state.status === AudioPlayerStatus.AutoPaused);
+        console.log(this.audioPlayer.checkPlayable());
+
         // let errorMessage = new EmbedBuilder()
         //     .setColor(DefaultErrorMessage)
         //     .setDescription("I am unable to play this song, sorry ;p");
@@ -84,11 +101,16 @@ export class MusicService {
         joinVoiceChannel({
             channelId: channel.id as string,
             adapterCreator: channel.guild.voiceAdapterCreator as any,
-            guildId: channel.guildId as string,
+            guildId: channel.guildId as string
         });
 
         if (this.voiceConnection === undefined) {
             this.voiceConnection = getVoiceConnection(member.guild.id as string);
+            this.audioPlayer = createAudioPlayer({
+                // behaviors: {
+                //     noSubscriber: NoSubscriberBehavior.Pause,
+                // },
+            });
         }
 
         this.voiceConnection?.on(VoiceConnectionStatus.Disconnected, () => {
