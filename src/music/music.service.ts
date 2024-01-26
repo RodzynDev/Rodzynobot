@@ -5,7 +5,7 @@ import {
     createAudioPlayer,
     createAudioResource,
     getVoiceConnection,
-    joinVoiceChannel,
+    joinVoiceChannel, NoSubscriberBehavior,
     VoiceConnection,
     VoiceConnectionStatus,
 } from '@discordjs/voice';
@@ -13,8 +13,11 @@ import {Injectable, Logger} from '@nestjs/common';
 import {Client, CommandInteraction, EmbedBuilder, GuildMember, RGBTuple} from "discord.js";
 import {InjectDiscordClient} from "@discord-nestjs/core";
 import ytdl from 'ytdl-core';
+import {EventEmitter2, OnEvent} from "@nestjs/event-emitter";
+import {formatSongDuration} from "../common/utils/formatSongDuration";
 
-export const DefaultErrorMessage: RGBTuple = [255, 161, 42];
+export const DefaultErrorMessageColor: RGBTuple = [205, 63, 63]
+export const DefaultMessageColor: RGBTuple = [255, 161, 42];
 
 @Injectable()
 export class MusicService {
@@ -22,16 +25,39 @@ export class MusicService {
     private audioPlayer: AudioPlayer | undefined;
     private voiceConnection: VoiceConnection | undefined;
     private audioResource: AudioResource | undefined;
+    private readonly eventEmitter: EventEmitter2
     constructor(
         @InjectDiscordClient() private readonly client: Client,
     ) {}
 
     async playSong(commandInteraction: CommandInteraction, songUrl: string) {
         this.logger.log(`Playing song ${songUrl}`);
-        console.log(commandInteraction.member);
 
-        this.audioResource = createAudioResource(ytdl(songUrl, {filter: 'audioonly'}));
-        this.tryJoinChannelAndEstablishVoiceConnection(commandInteraction.member as GuildMember);
+        const commandInteractionMember = commandInteraction.member as GuildMember;
+
+        // Validate song URL
+        if(ytdl.validateURL(songUrl) === false) {
+            let errorMessage = new EmbedBuilder()
+                .setColor(DefaultErrorMessageColor)
+                .setDescription("I am unable to play your song, because the URL you gave me is invalid. Please give me a valid URL");
+
+            return {
+                success: false,
+                reply: {
+                    embeds: [
+                        errorMessage
+                    ],
+                },
+            };
+        }
+
+        const songMetadata = await ytdl.getInfo(songUrl);
+        this.audioResource = await createAudioResource(ytdl(songUrl, {filter: 'audioonly'}));
+        const connectionData = await this.tryJoinChannelAndEstablishVoiceConnection(commandInteractionMember);
+
+        if(!connectionData.success) {
+            return connectionData.reply;
+        }
 
         if (this.voiceConnection === undefined) {
             this.logger.error(`Unable to play song ${songUrl} because voice connection is undefined`);
@@ -41,27 +67,24 @@ export class MusicService {
         this.audioPlayer.play(this.audioResource);
         this.voiceConnection.subscribe(this.audioPlayer);
 
-        console.log(this.audioPlayer.state.status);
-        console.log(this.audioPlayer.state.status === AudioPlayerStatus.Playing);
-        console.log(this.audioPlayer.state.status === AudioPlayerStatus.Idle);
-        console.log(this.audioPlayer.state.status === AudioPlayerStatus.Paused);
-        console.log(this.audioPlayer.state.status === AudioPlayerStatus.AutoPaused);
-        console.log(this.audioPlayer.checkPlayable());
+        let songInfoEmbed = new EmbedBuilder()
+            .setColor(DefaultMessageColor)
+            .setTitle(songMetadata.videoDetails.title)
+            .setURL(songUrl)
+            .setThumbnail(songMetadata.videoDetails.thumbnails[0].url)
+            .setDescription("I am now playing this song")
+            .setTimestamp()
+            .addFields(
+                { name: 'Duration', value: formatSongDuration(parseInt(songMetadata.videoDetails.lengthSeconds)), inline: true } as any,
+                { name: 'Queue Position', value: 1 + '', inline: true } as any,
+                { name: 'Added by', value: commandInteractionMember.user.globalName, inline: true } as any,
+            );
 
-        // let errorMessage = new EmbedBuilder()
-        //     .setColor(DefaultErrorMessage)
-        //     .setDescription("I am unable to play this song, sorry ;p");
-        //
-        // return {
-        //     success: false,
-        //     reply: {
-        //         embeds: [
-        //             errorMessage.toJSON()
-        //         ],
-        //     },
-        // };
-
-        return `Start playing ${songUrl}.`;
+        return {
+            embeds: [
+                songInfoEmbed
+            ],
+        };
     }
 
     private tryJoinChannelAndEstablishVoiceConnection(
@@ -83,14 +106,14 @@ export class MusicService {
             );
 
             let errorMessage = new EmbedBuilder()
-                .setColor(DefaultErrorMessage)
+                .setColor(DefaultErrorMessageColor)
                 .setDescription("I am unable to join your channel, because you don't seem to be in a voice channel. Connect to a channel first to use this command");
 
             return {
                 success: false,
                 reply: {
                     embeds: [
-                        errorMessage.toJSON()
+                        errorMessage
                     ],
                 },
             };
@@ -107,9 +130,9 @@ export class MusicService {
         if (this.voiceConnection === undefined) {
             this.voiceConnection = getVoiceConnection(member.guild.id as string);
             this.audioPlayer = createAudioPlayer({
-                // behaviors: {
-                //     noSubscriber: NoSubscriberBehavior.Pause,
-                // },
+                behaviors: {
+                    noSubscriber: NoSubscriberBehavior.Pause,
+                },
             });
         }
 
@@ -125,4 +148,15 @@ export class MusicService {
             reply: {},
         };
     }
+
+    // @OnEvent('internal.audio.track.announce')
+    // handleOnNewTrack(track: Track) {
+    //     const resource = createAudioResource(
+    //         track.getStreamUrl(this.jellyfinStreamBuilder),
+    //         {
+    //             inlineVolume: true,
+    //         },
+    //     );
+    //     this.playResource(resource);
+    // }
 }

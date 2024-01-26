@@ -4,6 +4,7 @@ import {ConfigModule, ConfigService} from "@nestjs/config";
 import configuration from "./common/config/configuration";
 import {MusicModule} from "./music/music.module";
 import {BotGateway} from "./bot.gateway";
+import {MessageModule} from "./message/message.module";
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -16,7 +17,8 @@ import {BotGateway} from "./bot.gateway";
       useFactory: async (config: ConfigService) => config.get('discord_config'),
       inject: [ConfigService],
     }),
-    MusicModule
+    MusicModule,
+    MessageModule
   ],
   providers: [
     BotGateway

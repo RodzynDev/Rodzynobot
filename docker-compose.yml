@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  rdnb_api:
+    image: node:18.14
+    command: npm run start:dev
+    links:
+      - rdnb_db_rodzynobot:rdnb_db
+    volumes:
+      - .:/usr/src/app
+    working_dir: /usr/src/app
+    env_file:
+      - .env
+    depends_on:
+      - apw_db_postgres
+
+  rdnb_db_rodzynobot:
+    image: postgres:15.2
+    environment:
+      POSTGRES_USER: ${RDNB_DB_USER}
+      POSTGRES_PASSWORD: ${RDNB_DB_PASSWORD}
+      POSTGRES_DB: ${RDNB_DB_NAME}
+      TZ: Europe/Warsaw
+    ports:
+      - "5432:5432"
+    volumes:
+      - .db:/var/lib/postgresql/data/
+    env_file:
+      - .env
