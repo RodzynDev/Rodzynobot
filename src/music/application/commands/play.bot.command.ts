@@ -5,11 +5,13 @@ import {
     Handler, IA,
     InteractionEvent,
 } from '@discord-nestjs/core';
-import {ClientEvents, CommandInteraction} from 'discord.js';
+import {ClientEvents, CommandInteraction, EmbedBuilder} from 'discord.js';
 
 import { PlayDto } from '../../domain/dto/play.dto';
-import {MusicService} from "../../music.service";
-import {Injectable} from "@nestjs/common";
+import {DefaultErrorMessageColor, MusicService} from "../../music.service";
+import {Injectable, Logger} from '@nestjs/common';
+import {Track} from "../../domain/track.entity";
+import {DefaultPlaylistName, Playlist} from "../../domain/playlist.entity";
 
 @Command({
     name: 'play',
@@ -17,13 +19,45 @@ import {Injectable} from "@nestjs/common";
 })
 @Injectable()
 export class PlayBotCommand {
-    constructor(private readonly musicService: MusicService) {}
+    private readonly logger = new Logger(MusicService.name)
+
+    constructor(
+        private readonly musicService: MusicService,
+    ) {}
 
     @Handler()
-    onPlayCommand(
+    async onPlayCommand(
         @InteractionEvent(SlashCommandPipe) PlayDTO: PlayDto,
         @IA() interaction: CommandInteraction,
-    ): any {
-        return this.musicService.playSong(interaction, PlayDTO.song)
+    ): Promise<any> {
+        this.logger.log(`Playing song ${PlayDTO.song}`);
+
+        const track: Track|any = await this.musicService.getSongTrackData(PlayDTO.song);
+        if (!(track instanceof Track)) {
+            let errorMessage = new EmbedBuilder()
+                .setColor(DefaultErrorMessageColor)
+                .setDescription(track.errorMessage);
+
+            return {
+                embeds: [
+                    errorMessage
+                ],
+            };
+        }
+
+        const playlist = await this.musicService.getSelectedOfDefaultPlaylist(PlayDTO.playlist ?? DefaultPlaylistName, interaction);
+        if (!(playlist instanceof Playlist)) {
+            let errorMessage = new EmbedBuilder()
+                .setColor(DefaultErrorMessageColor)
+                .setDescription("I am unable to play your song, because the playlist you gave me is invalid. Please give me a valid playlist name");
+
+            return {
+                embeds: [
+                    errorMessage
+                ],
+            };
+        }
+
+        return this.musicService.addSongToPlaylist(interaction, track, playlist);
     }
 }

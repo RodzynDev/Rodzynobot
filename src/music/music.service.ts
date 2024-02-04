@@ -9,15 +9,24 @@ import {
     VoiceConnection,
     VoiceConnectionStatus,
 } from '@discordjs/voice';
-import {Injectable, Logger} from '@nestjs/common';
+import {Inject, Injectable, Logger} from '@nestjs/common';
 import {Client, CommandInteraction, EmbedBuilder, GuildMember, RGBTuple} from "discord.js";
 import {InjectDiscordClient} from "@discord-nestjs/core";
 import ytdl from 'ytdl-core';
 import {EventEmitter2, OnEvent} from "@nestjs/event-emitter";
 import {formatSongDuration} from "../common/utils/formatSongDuration";
+import {Track} from "./domain/track.entity";
+import {DatabasePlaylistsRepository} from "./infrastructure/databasePlaylists.repository";
+import {DatabaseTracksRepository} from "./infrastructure/databaseTracks.repository";
+import {DefaultPlaylistName, Playlist} from "./domain/playlist.entity";
 
 export const DefaultErrorMessageColor: RGBTuple = [205, 63, 63]
 export const DefaultMessageColor: RGBTuple = [255, 161, 42];
+
+export class TrackErrorMessage {
+    success: boolean;
+    errorMessage: string
+}
 
 @Injectable()
 export class MusicService {
@@ -28,39 +37,80 @@ export class MusicService {
     private readonly eventEmitter: EventEmitter2
     constructor(
         @InjectDiscordClient() private readonly client: Client,
+        @Inject(DatabasePlaylistsRepository) private readonly databasePlaylistsRepository: DatabasePlaylistsRepository,
+        @Inject(DatabaseTracksRepository) private readonly databaseTracksRepository: DatabaseTracksRepository,
     ) {}
 
-    async playSong(commandInteraction: CommandInteraction, songUrl: string) {
-        this.logger.log(`Playing song ${songUrl}`);
+    async getSongTrackData(songUrl: string): Promise<Track | TrackErrorMessage> {
+        let songMetadata = null;
+        try {
+            if(ytdl.validateURL(songUrl) === false) {
+                return <TrackErrorMessage>{
+                    success: false,
+                    errorMessage: "I am unable to play your song, because the URL you gave me is invalid. Please give me a valid URL"
+                };
+            }
 
-        const commandInteractionMember = commandInteraction.member as GuildMember;
-
-        // Validate song URL
-        if(ytdl.validateURL(songUrl) === false) {
-            let errorMessage = new EmbedBuilder()
-                .setColor(DefaultErrorMessageColor)
-                .setDescription("I am unable to play your song, because the URL you gave me is invalid. Please give me a valid URL");
-
-            return {
+            songMetadata = await ytdl.getInfo(songUrl);
+        } catch (e) {
+            this.logger.error(`Unable to play song ${songUrl} because of error ${e}`);
+            return <TrackErrorMessage>{
                 success: false,
-                reply: {
-                    embeds: [
-                        errorMessage
-                    ],
-                },
+                errorMessage: "I am unable to play your song, because the URL you gave me is invalid. Please give me a valid URL"
             };
         }
 
-        const songMetadata = await ytdl.getInfo(songUrl);
-        this.audioResource = await createAudioResource(ytdl(songUrl, {filter: 'audioonly'}));
-        const connectionData = await this.tryJoinChannelAndEstablishVoiceConnection(commandInteractionMember);
+        let track: Track = await this.databaseTracksRepository.getTrackByURL(songUrl);
+        if(track === null) {
+            return this.databaseTracksRepository.createTrack(
+                songMetadata.videoDetails.title,
+                songUrl,
+                parseInt(songMetadata.videoDetails.lengthSeconds),
+                songMetadata.videoDetails.thumbnails[0].url,
+                0,
+                new Date(),
+                false,
+                false,
+                []
+            );
+        }
 
-        if(!connectionData.success) {
-            return connectionData.reply;
+        return track;
+    }
+
+    async getSelectedOfDefaultPlaylist(playlistName: string, commandInteraction: CommandInteraction) {
+        let playlist = await this.databasePlaylistsRepository.getPlaylistByName(playlistName);
+        if(playlist instanceof Playlist) {
+            return playlist;
+        }
+
+        const creator = commandInteraction.member as GuildMember;
+        return await this.databasePlaylistsRepository.createPlaylist(playlistName, playlistName === DefaultPlaylistName, false, 0, creator.user.id, creator.displayName,[]);
+    }
+
+    public async addSongToPlaylist(commandInteraction: CommandInteraction, track: Track, playlist: Playlist) {
+        playlist = await this.databasePlaylistsRepository.addTrackToPlaylist(playlist, track);
+
+        return await this.playSong(commandInteraction, playlist, track);
+    }
+
+    async playSong(commandInteraction: CommandInteraction, playlist: Playlist, track: Track) {
+        const commandInteractionMember = commandInteraction.member as GuildMember;
+
+        try {
+            this.audioResource = await createAudioResource(ytdl(track.url, {filter: 'audioonly'}));
+            const connectionData = await this.tryJoinChannelAndEstablishVoiceConnection(commandInteractionMember);
+
+            if(!connectionData.success) {
+                return connectionData.reply;
+            }
+        } catch (e) {
+            this.logger.error(`Unable to play song ${track.title} because of error ${e}`);
+            return;
         }
 
         if (this.voiceConnection === undefined) {
-            this.logger.error(`Unable to play song ${songUrl} because voice connection is undefined`);
+            this.logger.error(`Unable to play song ${track.title} because voice connection is undefined`);
             return;
         }
 
@@ -69,13 +119,13 @@ export class MusicService {
 
         let songInfoEmbed = new EmbedBuilder()
             .setColor(DefaultMessageColor)
-            .setTitle(songMetadata.videoDetails.title)
-            .setURL(songUrl)
-            .setThumbnail(songMetadata.videoDetails.thumbnails[0].url)
+            .setTitle(track.title)
+            .setURL(track.url)
+            .setThumbnail(track.thumbnail)
             .setDescription("I am now playing this song")
             .setTimestamp()
             .addFields(
-                { name: 'Duration', value: formatSongDuration(parseInt(songMetadata.videoDetails.lengthSeconds)), inline: true } as any,
+                { name: 'Duration', value: formatSongDuration(track.duration), inline: true } as any,
                 { name: 'Queue Position', value: 1 + '', inline: true } as any,
                 { name: 'Added by', value: commandInteractionMember.user.globalName, inline: true } as any,
             );

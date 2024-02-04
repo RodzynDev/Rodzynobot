@@ -5,6 +5,7 @@ import configuration from "./common/config/configuration";
 import {MusicModule} from "./music/music.module";
 import {BotGateway} from "./bot.gateway";
 import {MessageModule} from "./message/message.module";
+import {TypeOrmModule} from "@nestjs/typeorm";
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -15,6 +16,11 @@ import {MessageModule} from "./message/message.module";
     DiscordModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: async (config: ConfigService) => config.get('discord_config'),
+      inject: [ConfigService],
+    }),
+    TypeOrmModule.forRootAsync({
+      imports: [ConfigModule],
+      useFactory: async (config: ConfigService) => config.get('database_config'),
       inject: [ConfigService],
     }),
     MusicModule,
